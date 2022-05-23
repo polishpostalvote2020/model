@@ -1,0 +1,1436 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE nta PUBLIC '-//Uppaal Team//DTD Flat System 1.1//EN' 'http://www.it.uu.se/research/group/darts/uppaal/flat-1_2.dtd'>
+<nta>
+	<declaration>// Place global declarations here.
+int[0,30] day=0;
+// Configuration
+// 
+const int N_C = 1; // number of candidates
+const int N_MO = 1; // number of municipal offices
+const int N_EC = 1; // number of election commissions
+const int N_V = 4; // max number of voters
+const int N_Env = 4; // max number of envelopes
+//====================
+// Configuration dependencies
+typedef int[1,N_C] c_t;
+typedef int[0,N_C] c_tx;
+typedef int[1,N_Env] env_t;
+typedef int[0,N_Env] env_tx;
+const int N_RA = N_MO + N_EC; // reserved addresses
+const int ec_per_mo = 2;
+// - infty ... &lt;EC_id BLOCK&gt;, &lt;MO_id BLOCK&gt;, 0, &lt;V_id BLOCK&gt; ... +infty
+// lower bound &lt; upper bound
+typedef int[-N_MO,-1] mo_t;
+typedef int[-N_MO, 0] mo_tx;
+typedef int[-N_MO-N_EC,-N_MO-1] ec_t;
+typedef int[-N_RA,-1] auth_t;
+typedef int[1, N_V] v_t;
+typedef int[0, N_V] v_tx;
+const int addr_min = -N_RA;
+const int addr_max = N_V;
+typedef int[addr_min, addr_max] addr_t; // 0 stands for blank
+const int EC_MO[ec_t] ={
+     -1
+};
+const int ECi_MO[N_EC] ={
+     -1
+};
+//const int ECi_MO[N_EC] ={ -1,-1 };
+// const int MO_EC[mo_t] ={ -1,-1 };
+//====================
+typedef int[0,6] cmt_t;
+const cmt_t INTENTION_COMMENT = 1;
+const cmt_t INTENTION_RECEIVED = 1;
+const cmt_t EP_READY_COMMENT = 2;
+const cmt_t EP_SENT_COMMENT = 3;
+const cmt_t EP_COLLECTED_COMMENT = 4;
+const cmt_t POSTAL_VOTE_COMMENT = 5;
+const cmt_t CROSSED_OUT = 6;
+chan ch_comm[addr_t][addr_t]; // from-to communication channel
+typedef struct{
+	// v_t id; + pesel
+	// addr_t v_addr;
+	addr_t mo_addr;
+	addr_t ec_addr;
+	cmt_t comment;
+	bool changed;
+	// v_tx power_of_attorney;
+}v_record;
+const v_record empty_vrecord = { 0,0,0,0 };
+//Array(10).fill(0).map( function(_,x){ return [ -3-x%N_EC , -1-(((x%N_EC)/N_MO|0)%N_MO)].join('|') } ).join(', ')
+v_record vlist[v_t] = {
+    { -1,-2,0,0 },
+    { -1,-2,0,0 },
+    { -1,-2,0,0 },
+    { -1,-2,0,0 }
+};
+// helper f-n for the property verification
+int number_of_eligible_voters(){
+	int i,s=0;
+	for(i=1;i&lt;=N_V;i++){
+		s += (vlist[i].mo_addr) ? 1 : 0;
+	}
+	return s;
+}
+// int[-N_RA,5] vlist[v_t][2] = { {-3,0},{-3,0},{-4,0},{-5,0},{-5,0} }; //    | v_i | ec_i | note |  // equivalent to Union(all v_list)
+// -3,-4 to -1, -5 to -2
+bool debug_err = 0;
+// const int CHECK_EC = 1;
+// const int IN_PERSON = 1;
+/* 
+TODO:{
+    refine the event list,
+    e.g. 
+    var eventList = {
+        voter: ['CHECK', 'REC', 'SEND'],
+        adversary: ['STEAL', 'CORRUPT'],
+        ...
+    }
+    or depending on the system evolution 
+    (phase1 - setup, phase2 - preparation, phas3 - voting, etc)
+}
+*/
+/*
+TODO: add association between event and time
+partition time in accordance with constraints
+ACT1.timespan = [0,4)
+ACT2.timespan = [1,2)
+ACT3.timespan = [3,5)
+ACT4.timespan = [5,6)
+1111..
+.22...
+..333.
+....55
+taking ACT3 should block any further ACT2
+taking ACT4 should block all
+*/
+typedef int[0,77] evt_t;
+const evt_t CHECK_VLIST = 1 ;
+const evt_t IN_VLIST = 2 ;
+const evt_t RESP_VLIST = 3 ;
+const evt_t ON_LIST = 4 ;
+const evt_t IS_ELIGIBLE = 5 ;
+const evt_t FILL_INTENTION = 6 ;
+const evt_t SEND_INTENTION = 7 ;
+const evt_t RECV_INTENTION = 8 ;
+const evt_t COLL_INTENTION = 9 ;
+const evt_t REQ_VLIST_CHANGE = 10 ;
+const evt_t VLIST_CHANGE = 11 ;
+const evt_t DEC_INTENTION = 12 ;
+const evt_t COLLECT_INPERSON = 13 ;
+const evt_t PASS_EP = 14 ;
+const evt_t CHECK_MAILBOX = 15 ;
+const evt_t FILL_ENV = 16 ;
+const evt_t SEND_ENV = 17 ;
+const evt_t SEND_RENV = 18 ;
+const evt_t PASS_ENV = 19 ;
+const evt_t GET_RENV = 20 ;
+const evt_t COLL_RENV = 21 ;
+const evt_t RECV_RENV = 22 ;
+const evt_t PASS_RENV = 23 ;
+const evt_t RESP_ENV = 24 ;
+const evt_t ENV_ACC = 25 ;
+const evt_t SEND_EP = 26 ;
+const evt_t REC_ENV = 27 ;
+const evt_t HAS_ENV = 28 ;
+const evt_t STEAL_EP = 29 ;
+const evt_t HAS_EP = 30 ;
+const evt_t SECRETLY_OPEN = 31 ;
+const evt_t HAS_INTENTION = 32 ;
+const evt_t STEAL_INTENTION = 33 ;
+const evt_t SEAL_SEND = 34 ;
+const evt_t MOD_SEAL_SEND = 35 ;
+const evt_t LEARN_DATA = 36 ;
+const evt_t FWD_SEND = 37 ;
+const evt_t CORR_SEND = 38 ;
+const evt_t ALTER_SEND = 39 ;
+const evt_t NO_SEND = 40 ;
+const evt_t FILL_FORMS = 41 ;
+const evt_t ENV_DATA = 42 ;
+const evt_t OPEN_RENV = 43 ;
+const evt_t CAN_OPEN = 44 ;
+const evt_t PREPARE_EP = 45 ;
+const evt_t GET_VCERT = 46 ;
+const evt_t GIVE_VCERT = 47 ;
+const evt_t STEAL_RENV = 48 ;
+const evt_t GOOD_CHOICE = 49 ;
+const evt_t BAD_CHOICE = 50 ;
+const evt_t SEND_NOTIFICATION = 51 ;
+const evt_t RECEIVE_NOTIFICATION = 52 ;
+const evt_t CAN_IMPERSONATE = 53 ;
+const evt_t VALID = 54 ;
+const evt_t INVALID = 55 ;
+const evt_t INVALID_OR_ABSCENT = 56 ;
+const evt_t RECHECK_VLIST = 57 ;
+const evt_t NOT_ON_LIST = 58 ;
+const evt_t APPEND_VALID = 59 ;
+const evt_t PRINT_VLIST = 60 ;
+const evt_t PASS_PROTOCOL = 61 ;
+const evt_t PREP_PROTOCOL = 62 ;
+const evt_t REJ_PROTOCOL = 63 ;
+const evt_t ACC_PROTOCOL = 64 ;
+const evt_t GET_PROTOCOL = 65 ;
+const evt_t RESP_PROTOCOL = 66 ;
+const evt_t NOT_SEALED = 67 ;
+const evt_t SEALED = 68 ;
+const evt_t NO_ENV_LEFT = 69 ;
+const evt_t INCR_TIME = 70 ;
+const evt_t SET_WINNER = 71 ;
+const evt_t EDAY_END = 72 ;
+const evt_t PREF_CAND = 73 ;
+const evt_t FILL_BALLOT = 74 ;
+const evt_t SEAL_BENV = 75 ;
+const evt_t SEAL_RENV = 76 ;
+const evt_t SIGN_DEC = 77 ;
+// Interaction between agents
+chan check_vlist[v_t];
+chan get_vcert[v_t];
+chan dec_intention[v_t];
+chan collect_ep[v_t];
+// chan check_vlist[addr_t][addr_t];
+// chan get_vcert[addr_t][addr_t];
+// chan dec_intention[addr_t][addr_t];
+// chan collect_ep[addr_t][addr_t];
+chan pass_env[addr_t][addr_t];
+chan pass_protocol[ec_t];
+chan rej_protocol[ec_t];
+chan acc_protocol[ec_t];
+// Interaction with EP
+chan env_data[env_t];
+chan open_env[env_t];
+chan fill_forms[env_t];
+bool vlist_req[v_t][mo_t];
+int sh_m;
+bool buff_notification[v_t][mo_t];
+typedef struct{
+    bool inperson;
+}IntentionForm;
+const IntentionForm empty_intention = { 0 };
+const IntentionForm blank_intention = { 0 };
+IntentionForm sh_intention;
+bool buff_intention_not_empty[v_t][mo_t];
+IntentionForm buff_intention[v_t][mo_t];
+typedef struct{
+	bool invalid;
+	c_tx cell;
+}Benv;
+const Benv blank_benv = {
+    0, 0
+};
+v_tx bb_i = 0; // i for ballot box
+int[0,N_V] tally[c_t];
+int[0,N_V] sh_tally[c_t];
+int protocols_left = N_EC;
+bool isWinner(c_t x, int[0,1] strict){
+	// non-strict - Weak winner (draw)
+	int i,j;
+	// temporary assumption: if same number of votes then winner is the one with smaller id
+	j = x; 
+	if(strict==1){
+		for(i=1;i&lt;=N_C;i++){
+			if(i!=j &amp;&amp; tally[j]&lt;=tally[i]){
+				j = i;
+			}
+		}
+	}else{
+		for(i=1;i&lt;=N_C;i++){
+			if(i!=j &amp;&amp; tally[j]&lt;tally[i]){
+				j = i;
+			}
+		}
+	}
+	return j==x;
+}
+typedef struct{
+	addr_t dst; // district election commission
+    bool invalid;
+	Benv benv;
+}Renv;
+const Renv blank_renv = {0,0,blank_benv};
+Renv buff_renv[v_tx][ec_t];
+Renv sh_renv;
+typedef struct{
+	Renv renv;
+    bool sent;
+}ElectionPackage;
+const ElectionPackage blank_ep = {blank_renv, 0};
+ElectionPackage buff_ep[v_t][mo_t];
+ElectionPackage sh_ep;
+// guard condition on time
+int[0,1] gday(int[0,30] a, int[0,30] b){
+    return (day&gt;=a) &amp;&amp; (day&lt;=b);
+}
+broadcast chan announce_winner;
+c_tx winner;
+c_tx recorded_link[v_t];
+// returns index of max el in tally (0 if max value is not unique)
+c_tx get_winner(){
+    int i, j=1;
+    bool draw;
+    for(i=2;i&lt;=N_C;i++){
+        if(tally[j]&lt;tally[i]){
+            j = i;
+            draw=0;
+        }else if(tally[j]==tally[i]){
+            draw=1;
+        }
+    }
+    if(draw)
+        return 0;
+    else 
+        return j;
+}
+// WAIT COUNTERS
+bool end(){
+    return day==29;
+}</declaration>
+	<template>
+		<name x="8" y="8">VoterL</name>
+		<parameter>v_t id</parameter>
+		<declaration>// Place local declarations here.
+	addr_t mo_j;
+	addr_t ec_j;
+	c_tx pref_cand;
+	int[0,2] has_vcert;
+IntentionForm my_intention;
+Renv my_renv;
+bool requested_vlist_change=false;
+void fillIntention(int _inperson){
+	my_intention.inperson = _inperson;
+}
+// async
+void sendIntention(int mo_j){
+	buff_intention[id][mo_j] = my_intention;
+		if(id!=1)
+		my_intention = blank_intention;
+	buff_intention_not_empty[id][mo_j] = 1;
+	// after-action  // @YK (optional) todo: introduce action hooks
+}
+// sync
+void decIntention(int mo_j){
+	sh_intention = my_intention;
+		if(id!=1)
+		my_intention = blank_intention;
+	// after-action		
+}
+// async
+void checkMailbox(int mo_j){
+	my_renv = buff_ep[id][mo_j].renv; // copy the "message"
+	buff_ep[id][mo_j] = blank_ep; // reset the buff
+}
+// todo: right now will collect from ANY MO (not only MO_J)
+void collectInperson(){
+	my_renv = sh_ep.renv;
+	sh_ep = blank_ep;
+}
+// sync
+void passRenv(int ec_j){
+	my_renv.dst = ec_j;
+	sh_renv = my_renv;
+		if(id!=1)
+		my_renv = blank_renv;
+	// after-actions
+}
+// async
+void sendRenv(int ec_j){
+	my_renv.dst = ec_j;
+	buff_renv[id][ec_j] = my_renv;
+	// buff_renv[id][ec_j].benv = my_renv.benv;
+			if(id!=1)my_renv = blank_renv;
+}
+void fillForms(int _choice){
+	// possible errors: pesel, dec, seal (x2)
+	// if ERR and id%3 
+	// 0 - no pesel no sign
+	// 1 - no pesel sign
+	// 2 - pesel no sign
+	// my_renv.dec_pesel = (a==1 &amp;&amp; id%3&lt;2) ? 0 : id; // 
+	// my_renv.dec_signature = (a==1 &amp;&amp; id%2!=1) ? 0 : 1;
+		// my_renv.dst = ec_j;
+		my_renv.benv.cell = _choice;
+	if(id==1)pref_cand = _choice;
+}
+void sealRenv(int param){
+		// my_renv.dst = ec_j;
+		if(param==0){
+			my_renv.invalid = 1;
+		}
+}
+void sealBenv(int param){
+		if(param==0){
+			my_renv.benv.invalid = 1;
+		}
+}
+void signDec(int param){
+		if(param==0){
+			my_renv.invalid = 1;
+		}
+}
+void reqVlistChange(int target_mo){
+	vlist_req[id][target_mo] = 1;
+		mo_j = target_mo;
+		ec_j = 0; // if V was eligible BEFORE req, then should not use the old EC addr
+		requested_vlist_change = 1;
+}
+void getCert(){
+	if(id==1)has_vcert++;
+}
+void checkVlist(){
+	if(sh_m){
+		mo_j = EC_MO[sh_m];
+		ec_j = sh_m; // 0 if not eligible
+		sh_m = 0; // fflush
+	}
+	// scoped removal
+	requested_vlist_change=0;
+}
+void prefCand(int param){
+		if(id==1)pref_cand=param; 
+}
+void evtx(evt_t e, int param){
+	if(e == REQ_VLIST_CHANGE){
+		reqVlistChange(param);
+	}else if(e == FILL_INTENTION){
+		fillIntention(param);
+	}else if(e == FILL_BALLOT){
+		fillForms(param);
+	}else if(e == CHECK_MAILBOX){
+		checkMailbox(param);
+	}else if(e == SEND_RENV){
+		sendRenv(param);
+	}else if(e == PASS_RENV){
+		passRenv(param);
+	}else if(e == PREF_CAND){
+		prefCand(param);
+	}else if(e == SEAL_BENV){
+		sealBenv(param);
+	}else if(e == SEAL_RENV){
+		sealRenv(param);
+	}else if(e== SIGN_DEC){
+		signDec(param);
+	}else if(e == SEND_INTENTION){
+		sendIntention(param);
+	}else if(e == DEC_INTENTION){
+		decIntention(param);
+	}
+}
+void evt(evt_t e){
+	int i;
+	if(e == CHECK_VLIST){
+		checkVlist();
+	}else if(e == GET_VCERT){
+		getCert();
+	}else if(e == COLLECT_INPERSON){
+		collectInperson();
+	}
+}
+bool g(evt_t e){
+	if(e == CHECK_VLIST){ // do not check if already know in which vlist appear
+		return gday(0,20) &amp;&amp; (ec_j == 0) &amp;&amp; (forall(mo_i:mo_t)vlist_req[id][mo_i]==0);
+	}else if(e == REQ_VLIST_CHANGE){
+		return gday(0,23) &amp;&amp; !requested_vlist_change;
+	}else if(e == FILL_INTENTION){
+		return 1;
+	}else if(e == COLLECT_INPERSON){
+				if(id == 1) 
+					return my_intention.inperson==1;
+				else 
+					return 1;
+	}else if(e == GET_VCERT){
+				if(id == 1) 
+					return has_vcert==0;
+				else 
+					return 1;
+	}
+	return 0; // false by default
+}
+bool gx(evt_t e, int param){
+	if(e==FILL_BALLOT){
+				return (id==1) ? (param==pref_cand) : 1; // OR use the "addr==0" expression
+	}else if(e == DEC_INTENTION || e == SEND_INTENTION){
+			return param==mo_j;
+	}else if(e == CHECK_MAILBOX){
+		return buff_ep[id][param] != blank_ep; // it could be the case that dst!=id (e.g. delivered at the wrong mailbox)
+	}else if(e == SEAL_BENV){
+		return param == 1;
+	}else if(e== SIGN_DEC){
+		return param ==1;
+	}else if(e == SEAL_RENV){
+		return param ==1;
+	}else if(e == SEND_RENV){
+		return gday(0,26) &amp;&amp; param==ec_j;
+	}else if(e == PASS_RENV){
+		return gday(28,28) &amp;&amp; param==ec_j;
+	}
+	return 0;
+}
+void err_evt(evt_t e, int err){
+	if(err==0){
+		evt(e);
+	}else{
+		evt(e);
+	}
+}
+void err_evtx(evt_t e, int err, int param){
+	if(err==0){
+		evtx(e, param);
+	}else{
+		evtx(e, param);
+	}
+}
+bool err_g(evt_t e, int err){
+	if(err==0){
+		return g(e);
+	}else{		
+		if(e==GET_VCERT){
+			return 1;
+		}
+		return g(e);
+	}
+}
+bool err_gx(evt_t e, int err, int param){
+	if(err==0){
+		return gx(e, param);
+	}else{		
+		// add the logic here
+		if(e==FILL_BALLOT){
+			return 1;
+		}else if(e == SEAL_RENV){
+			return 1;
+		}else if(e == SEAL_BENV){
+			return 1;
+		}else if(e == SIGN_DEC){
+			return 1;
+		}else if(e == DEC_INTENTION || e == SEND_INTENTION){
+			return 1;
+		}
+		return gx(e, param);
+	}
+}</declaration>
+		<location id="id0" x="-24054" y="-24276">
+			<name x="-24030" y="-24268">expressed_intention</name>
+		</location>
+		<location id="id1" x="-23530" y="-24078">
+			<name x="-23570" y="-24063">passed_renv</name>
+		</location>
+		<location id="id2" x="-23530" y="-24270">
+			<name x="-23562" y="-24259">sent_renv</name>
+		</location>
+		<location id="id3" x="-23698" y="-24174">
+			<name x="-23681" y="-24199">filled_env</name>
+		</location>
+		<location id="id4" x="-23886" y="-23988">
+			<name x="-23942" y="-24020">has_env</name>
+		</location>
+		<location id="id5" x="-24278" y="-24276">
+			<name x="-24358" y="-24260">filled_intention</name>
+		</location>
+		<location id="id6" x="-24614" y="-24084">
+			<name x="-24641" y="-24072">idle</name>
+		</location>
+		<location id="id7" x="-24446" y="-24180">
+			<name x="-24526" y="-24164">checked_vlist</name>
+		</location>
+		<location id="id8" x="-24614" y="-23974">
+			<committed/>
+		</location>
+		<location id="id9" x="-23766" y="-23808">
+			<committed/>
+		</location>
+		<location id="id10" x="-23885" y="-23808">
+			<committed/>
+		</location>
+		<location id="id11" x="-23766" y="-23987">
+			<committed/>
+		</location>
+		<init ref="id8"/>
+		<transition>
+			<source ref="id11"/>
+			<target ref="id3"/>
+			<label kind="select" x="-23732" y="-24046">err_i:int[0,1],s_i:int[0,1]</label>
+			<label kind="guard" x="-23732" y="-24029">err_gx(SEAL_RENV,err_i,s_i)</label>
+			<label kind="assignment" x="-23732" y="-24012">err_evtx(SEAL_RENV,err_i,s_i)</label>
+		</transition>
+		<transition>
+			<source ref="id9"/>
+			<target ref="id11"/>
+			<label kind="select" x="-23715" y="-23893">err_i:int[0,1],s_i:int[0,1]</label>
+			<label kind="guard" x="-23715" y="-23876">err_gx(SIGN_DEC,err_i,s_i)</label>
+			<label kind="assignment" x="-23715" y="-23859">err_evtx(SIGN_DEC,err_i,s_i)</label>
+			<nail x="-23715" y="-23902"/>
+		</transition>
+		<transition>
+			<source ref="id10"/>
+			<target ref="id9"/>
+			<label kind="select" x="-23859" y="-23800">err_i:int[0,1],s_i:int[0,1]</label>
+			<label kind="guard" x="-23859" y="-23783">err_gx(SEAL_BENV,err_i, s_i)</label>
+			<label kind="assignment" x="-23859" y="-23766">err_evtx(SEAL_BENV,err_i, s_i)</label>
+		</transition>
+		<transition>
+			<source ref="id8"/>
+			<target ref="id6"/>
+			<label kind="select" x="-24604" y="-24042">c_i:c_t</label>
+			<label kind="assignment" x="-24604" y="-24025">evtx(PREF_CAND,c_i)</label>
+		</transition>
+		<transition>
+			<source ref="id7"/>
+			<target ref="id7"/>
+			<label kind="guard" x="-24422" y="-24084">g(GET_VCERT)</label>
+			<label kind="synchronisation" x="-24422" y="-24052">get_vcert[id]?</label>
+			<label kind="assignment" x="-24422" y="-24068">evt(GET_VCERT)</label>
+			<nail x="-24390" y="-24084"/>
+			<nail x="-24334" y="-24180"/>
+		</transition>
+		<transition>
+			<source ref="id6"/>
+			<target ref="id6"/>
+			<label kind="select" x="-24814" y="-24228">mo_i: mo_t</label>
+			<label kind="guard" x="-24814" y="-24212">g(REQ_VLIST_CHANGE)</label>
+			<label kind="assignment" x="-24814" y="-24196">evtx(REQ_VLIST_CHANGE, mo_i)</label>
+			<nail x="-24670" y="-24180"/>
+			<nail x="-24726" y="-24084"/>
+		</transition>
+		<transition>
+			<source ref="id3"/>
+			<target ref="id2"/>
+			<label kind="select" x="-23706" y="-24335">err_i:int[0,1],ec_i:ec_t</label>
+			<label kind="guard" x="-23706" y="-24318">err_gx(SEND_RENV,err_i, ec_i)</label>
+			<label kind="assignment" x="-23706" y="-24301">err_evtx(SEND_RENV,err_i, ec_i)</label>
+			<nail x="-23642" y="-24270"/>
+		</transition>
+		<transition>
+			<source ref="id3"/>
+			<target ref="id1"/>
+			<label kind="select" x="-23647" y="-24165">err_i:int[0,1],ec_i:ec_t</label>
+			<label kind="guard" x="-23647" y="-24147">err_gx(PASS_RENV,err_i,ec_i)</label>
+			<label kind="synchronisation" x="-23647" y="-24131">pass_env[id][ec_i]!</label>
+			<label kind="assignment" x="-23647" y="-24115">err_evtx(PASS_RENV,err_i, ec_i)</label>
+			<nail x="-23642" y="-24078"/>
+		</transition>
+		<transition>
+			<source ref="id4"/>
+			<target ref="id10"/>
+			<label kind="select" x="-24072" y="-23893">err_i:int[0,1],c_i:c_t</label>
+			<label kind="guard" x="-24072" y="-23876">err_gx(FILL_BALLOT,err_i, c_i)</label>
+			<label kind="assignment" x="-24072" y="-23859">err_evtx(FILL_BALLOT,err_i, c_i)</label>
+			<nail x="-23936" y="-23902"/>
+		</transition>
+		<transition>
+			<source ref="id0"/>
+			<target ref="id4"/>
+			<label kind="guard" x="-23942" y="-24236">g(COLLECT_INPERSON)</label>
+			<label kind="synchronisation" x="-23942" y="-24220">collect_ep[id]?</label>
+			<label kind="assignment" x="-23942" y="-24204">evt(COLLECT_INPERSON)</label>
+			<nail x="-23998" y="-24180"/>
+			<nail x="-23886" y="-24180"/>
+			<nail x="-23830" y="-24084"/>
+		</transition>
+		<transition>
+			<source ref="id0"/>
+			<target ref="id4"/>
+			<label kind="select" x="-24148" y="-24004">err_i:int[0,1],mo_i:mo_t</label>
+			<label kind="guard" x="-24148" y="-23987">err_gx(CHECK_MAILBOX,err_i,mo_i)</label>
+			<label kind="assignment" x="-24148" y="-23970">err_evtx(CHECK_MAILBOX,err_i,mo_i)</label>
+			<nail x="-23998" y="-24180"/>
+			<nail x="-24054" y="-24084"/>
+			<nail x="-23998" y="-23988"/>
+		</transition>
+		<transition>
+			<source ref="id5"/>
+			<target ref="id0"/>
+			<label kind="select" x="-24242" y="-24182">err_i:int[0,1],mo_i:mo_t</label>
+			<label kind="guard" x="-24242" y="-24165">err_gx(SEND_INTENTION,err_i,mo_i)</label>
+			<label kind="assignment" x="-24242" y="-24148">err_evtx(SEND_INTENTION,err_i, mo_i)</label>
+			<nail x="-24222" y="-24180"/>
+			<nail x="-24110" y="-24180"/>
+		</transition>
+		<transition>
+			<source ref="id5"/>
+			<target ref="id0"/>
+			<label kind="select" x="-24225" y="-24446">err_i:int[0,1],mo_i:mo_t</label>
+			<label kind="guard" x="-24225" y="-24428">err_gx(DEC_INTENTION,err_i, mo_i)</label>
+			<label kind="synchronisation" x="-24225" y="-24412">dec_intention[id]!</label>
+			<label kind="assignment" x="-24225" y="-24396">err_evtx(DEC_INTENTION,err_i,mo_i)</label>
+			<nail x="-24222" y="-24372"/>
+			<nail x="-24110" y="-24372"/>
+		</transition>
+		<transition>
+			<source ref="id7"/>
+			<target ref="id5"/>
+			<label kind="select" x="-24462" y="-24332">inp: int[0,1]</label>
+			<label kind="guard" x="-24462" y="-24316">g(FILL_INTENTION)</label>
+			<label kind="assignment" x="-24462" y="-24300">evtx(FILL_INTENTION,inp)</label>
+			<nail x="-24390" y="-24276"/>
+		</transition>
+		<transition>
+			<source ref="id6"/>
+			<target ref="id7"/>
+			<label kind="guard" x="-24582" y="-24240">g(CHECK_VLIST)</label>
+			<label kind="synchronisation" x="-24582" y="-24224">check_vlist[id]?</label>
+			<label kind="assignment" x="-24582" y="-24208">evt(CHECK_VLIST)</label>
+			<nail x="-24558" y="-24180"/>
+		</transition>
+	</template>
+	<template>
+		<name>MunicipalOffice</name>
+		<parameter>mo_t  id</parameter>
+		<declaration>IntentionForm intention_from[v_t];
+bool has_intention[v_t];
+// bool sent_notification[v_t];
+bool has_ep[v_t];
+bool stamped_ballots[v_t];
+// Renv renv_from[v_t];
+addr_t ec_j;
+bool eligible(v_t v_i){ // for the CURR mo ONLY
+	return vlist[v_i].mo_addr == id &amp;&amp; vlist[v_i].comment!=CROSSED_OUT;
+}
+bool onMyVlist(v_t v_i){
+	return vlist[v_i].mo_addr == id &amp;&amp; vlist[v_i].comment!=CROSSED_OUT;
+}
+bool check_intention(IntentionForm a){
+	return 1;
+}
+bool isValid(IntentionForm a){
+	return 1;
+}
+void checkVlist(int v_i){
+	sh_m = onMyVlist(v_i) ? vlist[v_i].ec_addr : 0;
+}
+void getVcert(int v_i){
+	vlist[v_i].mo_addr = 0;
+	vlist[v_i].ec_addr = 0;
+	vlist[v_i].comment = CROSSED_OUT;
+}
+// intentions sent from Voters who are not on the given MO's vlist will be discarded
+// if more than one intentions were sent, then only last one will be considered
+void recIntention(int v_i){
+	// todo: IntentionForm struct might need a dateOfSending field
+	// (e.g. V can send Intention on day 1, but the MO will only check it on day 22)
+	if( onMyVlist(v_i) ){
+		vlist[v_i].comment = INTENTION_RECEIVED;
+		intention_from[v_i] = buff_intention[v_i][id];
+		has_intention[v_i] = 1;
+	}
+	buff_intention[v_i][id] = blank_intention;
+	buff_intention_not_empty[v_i][id]=0;
+}
+void decIntention(int v_i){
+	// if( eligible(a) ){
+	if(isValid(sh_intention)){
+		// TODO: add case when V is eligible but marked the wrong ec_j in his form
+		vlist[v_i].comment = INTENTION_RECEIVED;
+		intention_from[v_i] = sh_intention;
+		has_intention[v_i] = 1;
+	}
+}
+// void sendNotification(int v_i){
+// 	buff_notification[v_i][id]=1;		
+// 	sent_notification[v_i]=1;
+// 	has_intention[v_i]=0;
+// 	
+// }
+// MO only preps EP for voter from its vlist
+void prepareEp(int v_i){
+	// ASSUMPTION: intention's validity check WAS performed
+	vlist[v_i].comment = EP_READY_COMMENT;
+	stamped_ballots[v_i] = true;
+}
+void prepareEpErr(int v_i){
+	vlist[v_i].comment = EP_READY_COMMENT;
+	stamped_ballots[v_i] = false;
+}
+void collectInperson(int v_i){
+	ElectionPackage ep_sample; 
+	sh_ep = ep_sample;		
+		sh_ep.renv.benv.invalid = !stamped_ballots[v_i];
+	vlist[v_i].comment = EP_COLLECTED_COMMENT;
+	// after-action
+}
+void sendEp(int v_i){
+	buff_ep[v_i][id].sent = 1;
+	buff_ep[v_i][id].renv.benv.invalid = !stamped_ballots[v_i];
+	// after-action
+	vlist[v_i].comment = EP_SENT_COMMENT;
+}
+// requests from Voters who are not on given MO's vlist will be discarded
+void onReqVlistChange(int v_i){
+	vlist_req[v_i][id] = 0;
+	if(vlist[v_i].mo_addr!=id){
+		vlist[v_i].mo_addr = id;
+		//i=a;
+		//while(ECi_MO[i%N_EC]!=id){i++;}
+		vlist[v_i].ec_addr = -N_MO-1-v_i%N_EC;
+		vlist[v_i].changed = 1;
+	}
+}
+void passProtocol(int ec_i){
+	ec_j = ec_i;
+}
+void respProtocol(int rejected){
+	meta int i;
+	if(rejected==0){
+		for(i=1;i&lt;=N_C;i++){
+			tally[i]+=sh_tally[i];
+		}
+		protocols_left--;
+	}
+}
+void evt(evt_t e){
+	//
+}
+// TODO: MO should send EP only to voters from OWN VLIST, not any other (same for intention rec)
+// For municipal office
+void evtx(evt_t e, int param){
+	int i;
+	// place for some pre-values here (e.g. stamp id)
+	if(e == IN_VLIST){
+		checkVlist(param);
+	}else if(e == GIVE_VCERT){
+		getVcert(param);
+	}else if(e == RECV_INTENTION){
+		recIntention(param);
+	}else if(e == COLL_INTENTION){
+		decIntention(param);
+	// }else if(e == SEND_NOTIFICATION){
+	// 	sendNotification(param);
+	}else if( e == PREPARE_EP ){
+		prepareEp(param);
+	}else if(e == PASS_EP){
+		collectInperson(param);
+	}else if(e == SEND_EP){
+		sendEp(param);
+	}else if( e == VLIST_CHANGE){	
+		onReqVlistChange(param);
+	}else if(e==GET_PROTOCOL){
+		passProtocol(param);
+	}else if(e==RESP_PROTOCOL){
+		respProtocol(param);
+	}
+}
+bool gx(evt_t e, int param){
+	// anyone can check if on the given vlist
+	if(e == IN_VLIST){
+		return onMyVlist(param);
+	}else if( e == VLIST_CHANGE){ // ADD NEW IS EQUIV TO CHANGE HERE (can a newly registered V ask for change later???)
+		return !vlist[param].changed &amp;&amp; vlist_req[param][id]==1 &amp;&amp; vlist[param].comment == 0;
+	}else if(e == RECV_INTENTION){
+		return gday(0,16) &amp;&amp; buff_intention_not_empty[param][id];
+	}else if(e == COLL_INTENTION){
+		return gday(0,16) &amp;&amp; onMyVlist(param);
+	}else if( e == PREPARE_EP){
+		return gday(12,22) &amp;&amp; onMyVlist(param) &amp;&amp; vlist[param].comment == INTENTION_RECEIVED;
+	}else if( e == PASS_EP){
+		return gday(12,22) &amp;&amp; onMyVlist(param) &amp;&amp; vlist[param].comment == EP_READY_COMMENT &amp;&amp; intention_from[param].inperson == 1 &amp;&amp; check_intention(intention_from[param]);
+	}else if( e == SEND_EP){ // = CAN_SEND
+		return gday(12,23) &amp;&amp; onMyVlist(param) &amp;&amp; vlist[param].comment == EP_READY_COMMENT &amp;&amp; intention_from[param].inperson == 0 &amp;&amp; check_intention(intention_from[param]);
+	}else if(e == GIVE_VCERT){
+		return gday(0,26) &amp;&amp; onMyVlist(param);
+	// }else if(e == SEND_NOTIFICATION){
+	// 	// only send notification if: 
+	// 	// intention was previously received, notification was not already sent and form is invalid
+	// 	if(has_intention[param] &amp;&amp; !sent_notification[param] &amp;&amp; !check_intention(intention_from[param]) 
+	// 	){
+	// 		return 1;
+	// 	}else{
+	// 		return 0;
+	// 	}
+	}else if(e == GET_PROTOCOL){
+        return EC_MO[param]==id;
+    }else if(e==RESP_PROTOCOL){
+		return param == 0;
+	}
+	return 0;
+}
+void err_evt(evt_t e, int err){
+	if(err==0){
+		evt(e);
+	}else{
+		// default behaviour unless explicitly specified otherwise
+		evt(e);
+	}
+}
+void err_evtx(evt_t e, int err, int param){
+	if(err==0){
+		evtx(e, param);
+	}else{
+		//
+		if (e == PREPARE_EP){
+			prepareEpErr(param);
+		}else{
+			evtx(e, param);
+		}
+	}
+}
+bool g(evt_t e){
+	return 0;
+}
+bool err_g(evt_t e, int err){
+	if(err==0){
+		return g(e);
+	}else{		
+		// add the logic here
+		return g(e); // should not be true by default
+	}
+}
+bool err_gx(evt_t e, int err, int param){
+	if(err==0){
+		return gx(e, param);
+	}else{		
+		// add the logic here
+		if(e == GIVE_VCERT){
+			return !gx(e, param);
+		}else{
+			return gx(e, param);
+		}
+	}
+}</declaration>
+		<location id="id12" x="160" y="480">
+			<committed/>
+		</location>
+		<location id="id13" x="160" y="320">
+		</location>
+		<init ref="id13"/>
+		<transition>
+			<source ref="id12"/>
+			<target ref="id13"/>
+			<label kind="select" x="187" y="501">resp:int[0,1]</label>
+			<label kind="guard" x="187" y="485">gx(RESP_PROTOCOL, resp)</label>
+			<label kind="synchronisation" x="187" y="517">(resp ? rej_protocol[ec_j] : acc_protocol[ec_j])!</label>
+			<label kind="assignment" x="187" y="533">evtx(RESP_PROTOCOL, resp)</label>
+			<nail x="448" y="480"/>
+			<nail x="448" y="320"/>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id12"/>
+			<label kind="select" x="168" y="360">ec_i:ec_t</label>
+			<label kind="guard" x="168" y="376">gx(GET_PROTOCOL, ec_i)</label>
+			<label kind="synchronisation" x="168" y="392">pass_protocol[ec_i]?</label>
+			<label kind="assignment" x="168" y="408">evtx(GET_PROTOCOL, ec_i)</label>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id13"/>
+			<label kind="select" x="194" y="-331">v_i:v_t</label>
+			<label kind="guard" x="194" y="-315">gx(GIVE_VCERT, v_i)</label>
+			<label kind="synchronisation" x="194" y="-300">get_vcert[v_i]!</label>
+			<label kind="assignment" x="194" y="-285">evtx(GIVE_VCERT, v_i)</label>
+			<nail x="162" y="-260"/>
+			<nail x="450" y="-260"/>
+			<nail x="448" y="320"/>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id13"/>
+			<label kind="select" x="192" y="-24">v_i:v_t</label>
+			<label kind="guard" x="192" y="-8">gx(PREPARE_EP, v_i)</label>
+			<label kind="assignment" x="192" y="8">evtx(PREPARE_EP, v_i)</label>
+			<nail x="160" y="32"/>
+			<nail x="448" y="32"/>
+			<nail x="448" y="320"/>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id13"/>
+			<label kind="select" x="194" y="-507">v_i:v_t</label>
+			<label kind="guard" x="194" y="-491">gx(VLIST_CHANGE, v_i)</label>
+			<label kind="assignment" x="194" y="-476">evtx(VLIST_CHANGE,v_i)</label>
+			<nail x="162" y="-452"/>
+			<nail x="450" y="-452"/>
+			<nail x="448" y="320"/>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id13"/>
+			<label kind="select" x="192" y="168">v_i:v_t</label>
+			<label kind="guard" x="192" y="184">gx(SEND_EP, v_i)</label>
+			<label kind="assignment" x="192" y="200">evtx(SEND_EP, v_i)</label>
+			<nail x="160" y="224"/>
+			<nail x="448" y="224"/>
+			<nail x="448" y="320"/>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id13"/>
+			<label kind="select" x="192" y="56">v_i:v_t</label>
+			<label kind="guard" x="192" y="72">gx(PASS_EP, v_i)</label>
+			<label kind="synchronisation" x="192" y="87">collect_ep[v_i]!</label>
+			<label kind="assignment" x="192" y="102">evtx(PASS_EP, v_i)</label>
+			<nail x="160" y="128"/>
+			<nail x="448" y="128"/>
+			<nail x="448" y="320"/>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id13"/>
+			<label kind="select" x="194" y="-139">v_i:v_t</label>
+			<label kind="guard" x="194" y="-123">gx(COLL_INTENTION, v_i)</label>
+			<label kind="synchronisation" x="194" y="-107">dec_intention[v_i]?</label>
+			<label kind="assignment" x="194" y="-92">evtx(COLL_INTENTION, v_i)</label>
+			<nail x="162" y="-68"/>
+			<nail x="450" y="-68"/>
+			<nail x="448" y="320"/>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id13"/>
+			<label kind="select" x="194" y="-220">v_i:v_t</label>
+			<label kind="guard" x="194" y="-203">gx(RECV_INTENTION, v_i)</label>
+			<label kind="assignment" x="194" y="-188">evtx(RECV_INTENTION, v_i)</label>
+			<nail x="162" y="-164"/>
+			<nail x="450" y="-164"/>
+			<nail x="448" y="320"/>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id13"/>
+			<label kind="select" x="194" y="-427">v_i:v_t</label>
+			<label kind="guard" x="194" y="-411">gx(IN_VLIST, v_i)</label>
+			<label kind="synchronisation" x="194" y="-396">check_vlist[v_i]!</label>
+			<label kind="assignment" x="194" y="-380">evtx(IN_VLIST, v_i)</label>
+			<nail x="162" y="-356"/>
+			<nail x="450" y="-356"/>
+			<nail x="448" y="320"/>
+		</transition>
+	</template>
+	<template>
+		<name>ElectionCommission</name>
+		<parameter>ec_t id</parameter>
+		<declaration>
+// in EC dec
+//Benv benv_from[v_t];
+Benv b_box[4];
+// meta int voter_ballot_link[v_t] = { -1, -1, -1, -1 };
+v_tx ballot_voter_link[4];
+int[0,4] b_i = 0;
+int[0,4] invalid_cnt = 0;
+v_tx valid_cnt = 0;
+v_tx v_j; // current voter/envolope
+// mo_t mo_j;// = (id+N_MO-1)/2; // my MO id
+int[0,N_V] tally_j[c_t];
+// TODO: use only one var instead of arr
+Renv renv_from[v_t]; 
+bool has_renv[v_t];
+int d_err;
+int[0,1] isValid (Renv renv){
+    if( renv.invalid){
+        return 0;
+    }
+    return 1;
+}
+bool gx(evt_t e, int param){
+    if(e == RECV_RENV){
+        // return (buff_renv[a][b].src == a) &amp;&amp;
+        if(buff_renv[param][id] == blank_renv)return 0;
+        return gday(28,28) &amp;&amp; (buff_renv[param][id].dst == id) &amp;&amp; !has_renv[param];
+    }
+    return 0;
+}
+bool g(evt_t e){
+    int i;
+    if(e == SEALED){
+        return renv_from[v_j].invalid==0;
+    }else if(e == NOT_SEALED){
+        return renv_from[v_j].invalid==1;
+    }else if(e == NOT_ON_LIST){
+        return 0;
+    }else if(e == VALID || e == APPEND_VALID){
+        return (vlist[v_j] != empty_vrecord) 
+                &amp;&amp; vlist[v_j].comment!=POSTAL_VOTE_COMMENT
+                &amp;&amp; (isValid(renv_from[v_j])==1);
+    }else if(e == INVALID ){
+        return (vlist[v_j] == empty_vrecord) 
+                || vlist[v_j].comment==POSTAL_VOTE_COMMENT
+                || (isValid(renv_from[v_j])==0);
+    }else if(e==ACC_PROTOCOL){
+        // todo: ...
+        return 1;
+    }else if(e== INVALID_OR_ABSCENT){
+        return (vlist[v_j] == empty_vrecord) 
+                || vlist[v_j].comment==POSTAL_VOTE_COMMENT
+                || (isValid(renv_from[v_j])==0);
+    }else if(e == PRINT_VLIST){
+        return day&lt;=28;
+    }else if(e == EDAY_END){
+        return gday(29,29);
+    }else if(e== COLL_RENV){
+        return gday(28,28);
+    }
+    return 0;
+}
+void evtx(evt_t e, int param){
+    if(e == COLL_RENV){
+        v_j = param;
+        // TODO: consider case when V comes/sends twice
+        renv_from[v_j] = sh_renv;
+        has_renv[v_j] = 1;
+    }else if(e == RECV_RENV){
+        v_j = param; 
+            renv_from[v_j].benv = buff_renv[v_j][id].benv;
+            renv_from[v_j].dst = buff_renv[v_j][id].dst;
+            renv_from[v_j].invalid = buff_renv[v_j][id].invalid;
+        // renv_from[a].src = (buff_renv[a][b].src);
+        has_renv[v_j] = 1;
+		// buff_renv[a][b] = blank_renv; // indicates that renv was received for verification
+    }
+}
+void evt(evt_t e){
+    int i,j;
+    if(e == PRINT_VLIST){
+        // temp solution, to hack init "must be computable at compile time" err
+        // mo_j = EC_MO[id];
+    }else if(e == OPEN_RENV){
+    }else if(e == RECHECK_VLIST){
+    }else if(e == VALID){
+        vlist[v_j].comment = POSTAL_VOTE_COMMENT;
+        b_box[b_i++] = renv_from[v_j].benv;
+        // 
+        ballot_voter_link[b_i-1] = v_j;
+        v_j = 0;
+    }else if(e == APPEND_VALID){
+        // for technical reasons append is done at the end of RECHECK_VLIST case
+        valid_cnt++;
+        vlist[v_j].comment = POSTAL_VOTE_COMMENT;
+        b_box[b_i++] = renv_from[v_j].benv;
+        // 
+        ballot_voter_link[b_i-1] = v_j;
+        v_j = 0;
+    }else if(e == INVALID || e == INVALID_OR_ABSCENT || e== NOT_SEALED){
+        invalid_cnt++;
+        v_j = 0;
+    // ignore the part below for now...
+    }else if(e == PREP_PROTOCOL){
+        // re-calc here does not change outcome (w/o extra err_len variable)
+        // thus 0 - no error, &gt;1 - errors for first err-ballots calc
+        // this does not reflect the actual probability distribution, but rather possible traces
+        // (some of those are much less likely to occur, e.g. calculating more than a half of wrong)
+        // calc can possibly be self-balancing (e.g. trivial swap/permutation)
+        // TODO: types of errors (wrong index - *, perm, nearest num, flipped numblock, valid-invalid mix), random choice of err parameters
+        // TODO: error tally (distinct, unique) encoding (with parameter of error length)
+        // atm err-len = length of POTENTIAL error prefix
+        for(i=0;i&lt;b_i;i++){
+           // validity check
+                    if(!b_box[i].invalid){
+                        j = b_box[i].cell;
+                if(j&gt;0){
+                    tally_j[j]++;
+                        if(ballot_voter_link[i]){ // safety check
+                            recorded_link[ballot_voter_link[i]]=j;
+                        }else{
+                            // some error code
+                        }
+                }   
+            }else{
+                invalid_cnt++;
+            }
+        }
+        // todo: make error non-det (for technical reasons)
+        // for simplicity it might be assumed that error always occur in err-len index of b_box
+    }else if(e == PASS_PROTOCOL){
+        sh_tally = tally_j;
+    }
+}
+bool verify_benv(Benv x){
+    return ( !x.invalid );
+}
+bool verify_renv(Renv x){
+    return ( !x.invalid );
+}
+bool no_env_left(){ // sanity check
+    // "=" finished job in time
+    int i;
+    for(i=1;i&lt;=N_V;i++){
+        if(buff_renv[i][id] != blank_renv){
+            if( (buff_renv[i][id].dst == id) &amp;&amp; !has_renv[i] ){
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+void err_evt(evt_t e, int err){
+	if(err==0){
+		evt(e);
+	}else{
+        evt(e);
+		//
+	}
+}
+void err_evtx(evt_t e, int err, int param){
+	if(err==0){
+		evtx(e, param);
+	}else{
+        evtx(e, param);
+		//
+	}
+}
+bool err_g(evt_t e, int err){
+	if(err==0){
+		return g(e);
+	}else{		
+		// add the logic here
+        return g(e);
+	}
+}
+bool err_gx(evt_t e, int err, int param){
+	if(err==0){
+		return gx(e, param);
+	}else{		
+		// add the logic here
+		return gx(e, param);
+	}
+}</declaration>
+		<location id="id14" x="432" y="-320">
+			<committed/>
+		</location>
+		<location id="id15" x="88" y="64">
+			<name x="8" y="64">will_count</name>
+		</location>
+		<location id="id16" x="424" y="-128">
+			<name x="432" y="-120">added_invalid</name>
+			<committed/>
+		</location>
+		<location id="id17" x="256" y="-416">
+			<name x="216" y="-400">added_valid</name>
+			<committed/>
+		</location>
+		<location id="id18" x="600" y="-416">
+			<name x="624" y="-432">requested_clarification</name>
+			<committed/>
+		</location>
+		<location id="id19" x="256" y="-224">
+			<name x="240" y="-208">must_open</name>
+			<committed/>
+		</location>
+		<location id="id20" x="88" y="256">
+			<name x="16" y="272">prepared_protocol</name>
+			<committed/>
+		</location>
+		<location id="id21" x="424" y="64">
+			<name x="416" y="80">halt</name>
+		</location>
+		<location id="id22" x="-80" y="-32">
+			<name x="-104" y="-64">idle</name>
+			<label kind="invariant" x="-110" y="-17">day&lt;=28</label>
+		</location>
+		<location id="id23" x="256" y="160">
+			<name x="264" y="168">passed_protocol</name>
+		</location>
+		<location id="id24" x="88" y="-128">
+		</location>
+		<init ref="id22"/>
+		<transition>
+			<source ref="id19"/>
+			<target ref="id16"/>
+			<label kind="guard" x="304" y="-184">g(NOT_SEALED)</label>
+			<label kind="assignment" x="304" y="-168">evt(NOT_SEALED)</label>
+			<nail x="312" y="-128"/>
+		</transition>
+		<transition>
+			<source ref="id19"/>
+			<target ref="id14"/>
+			<label kind="guard" x="264" y="-360">g(SEALED)</label>
+			<label kind="assignment" x="264" y="-344">evt(OPEN_RENV)</label>
+			<nail x="312" y="-320"/>
+		</transition>
+		<transition>
+			<source ref="id23"/>
+			<target ref="id21"/>
+			<label kind="guard" x="296" y="24">g(ACC_PROTOCOL)</label>
+			<label kind="synchronisation" x="296" y="40">acc_protocol[id]?</label>
+			<nail x="312" y="64"/>
+		</transition>
+		<transition>
+			<source ref="id23"/>
+			<target ref="id15"/>
+			<label kind="guard" x="112" y="24">g(REJ_PROTOCOL)</label>
+			<label kind="synchronisation" x="112" y="40">rej_protocol[id]?</label>
+			<nail x="200" y="64"/>
+		</transition>
+		<transition>
+			<source ref="id16"/>
+			<target ref="id24"/>
+			<nail x="368" y="-32"/>
+			<nail x="144" y="-32"/>
+		</transition>
+		<transition>
+			<source ref="id18"/>
+			<target ref="id16"/>
+			<label kind="guard" x="608" y="-232">g(INVALID_OR_ABSCENT)</label>
+			<label kind="assignment" x="608" y="-216">evt(INVALID_OR_ABSCENT)</label>
+			<nail x="648" y="-320"/>
+			<nail x="592" y="-224"/>
+			<nail x="536" y="-128"/>
+		</transition>
+		<transition>
+			<source ref="id18"/>
+			<target ref="id17"/>
+			<label kind="guard" x="416" y="-552">g(APPEND_VALID)</label>
+			<label kind="assignment" x="416" y="-536">evt(APPEND_VALID)</label>
+			<nail x="544" y="-512"/>
+			<nail x="312" y="-512"/>
+		</transition>
+		<transition>
+			<source ref="id17"/>
+			<target ref="id24"/>
+			<nail x="144" y="-416"/>
+			<nail x="32" y="-224"/>
+		</transition>
+		<transition>
+			<source ref="id14"/>
+			<target ref="id18"/>
+			<label kind="guard" x="472" y="-392">g(NOT_ON_LIST)</label>
+			<label kind="synchronisation" x="472" y="-360">check_vlist[v_j]?</label>
+			<label kind="assignment" x="472" y="-376">evt(RECHECK_VLIST)</label>
+			<nail x="488" y="-416"/>
+		</transition>
+		<transition>
+			<source ref="id14"/>
+			<target ref="id16"/>
+			<label kind="guard" x="376" y="-272">g(INVALID)</label>
+			<label kind="assignment" x="376" y="-256">evt(INVALID)</label>
+			<nail x="480" y="-224"/>
+		</transition>
+		<transition>
+			<source ref="id14"/>
+			<target ref="id17"/>
+			<label kind="guard" x="288" y="-456">g(VALID)</label>
+			<label kind="assignment" x="288" y="-440">evt(VALID)</label>
+			<nail x="376" y="-416"/>
+		</transition>
+		<transition>
+			<source ref="id24"/>
+			<target ref="id19"/>
+			<label kind="select" x="192" y="-128">v_i:v_t</label>
+			<label kind="guard" x="192" y="-112">gx(RECV_RENV, v_i)</label>
+			<label kind="assignment" x="192" y="-96">evtx(RECV_RENV, v_i)</label>
+			<nail x="200" y="-128"/>
+		</transition>
+		<transition>
+			<source ref="id15"/>
+			<target ref="id20"/>
+			<label kind="assignment" x="40" y="152">evt(PREP_PROTOCOL)</label>
+			<nail x="32" y="160"/>
+		</transition>
+		<transition>
+			<source ref="id20"/>
+			<target ref="id23"/>
+			<label kind="synchronisation" x="224" y="232">pass_protocol[id]!</label>
+			<label kind="assignment" x="224" y="216">evt(PASS_PROTOCOL)</label>
+			<nail x="200" y="256"/>
+		</transition>
+		<transition>
+			<source ref="id22"/>
+			<target ref="id24"/>
+			<label kind="guard" x="-80" y="-168">g(PRINT_VLIST)</label>
+			<label kind="assignment" x="-80" y="-152">evt(PRINT_VLIST)</label>
+			<nail x="-24" y="-128"/>
+		</transition>
+		<transition>
+			<source ref="id24"/>
+			<target ref="id15"/>
+			<label kind="guard" x="-32" y="-8">g(EDAY_END)</label>
+			<nail x="32" y="-32"/>
+		</transition>
+		<transition>
+			<source ref="id24"/>
+			<target ref="id19"/>
+			<label kind="select" x="96" y="-296">v_i:v_t</label>
+			<label kind="guard" x="96" y="-280">g(COLL_RENV)</label>
+			<label kind="synchronisation" x="96" y="-264">pass_env[v_i][id]?</label>
+			<label kind="assignment" x="96" y="-248">evtx(COLL_RENV, v_i)</label>
+			<nail x="144" y="-224"/>
+		</transition>
+	</template>
+	<template>
+		<name>Time</name>
+		<declaration>
+const int TIME_BLOCKS[8] ={ 2,12,16,22,23,26,28,29 };
+int[0,7] tb_ptr; // time block pointer
+bool g(evt_t e){
+    if(e==INCR_TIME &amp;&amp; tb_ptr+1&lt;8){
+        return 1;
+    }else if(e==SET_WINNER){
+        return (protocols_left==0);
+    }
+    return 0;
+}
+void evt(evt_t e){
+    if(e==INCR_TIME){
+        day = TIME_BLOCKS[++tb_ptr];
+    }else if(e==SET_WINNER){
+        winner = get_winner();
+    }
+}
+bool gx(evt_t e, int param){
+    return 0;
+}
+void evtx(evt_t e, int param){
+    //
+}
+void err_evt(evt_t e, int err){
+	if(err==0){
+		evt(e);
+	}else{
+		//
+	}
+}
+void err_evtx(evt_t e, int err, int param){
+	if(err==0){
+		evtx(e, param);
+	}else{
+		//
+	}
+}
+bool err_g(evt_t e, int err){
+	if(err==0){
+		return g(e);
+	}else{		
+		// add the logic here
+		return 1; // true by default
+	}
+}
+bool err_gx(evt_t e, int err, int param){
+	if(err==0){
+		return gx(e, param);
+	}else{		
+		// add the logic here
+		return 1; // true by default
+	}
+}</declaration>
+		<location id="id25" x="224" y="-32">
+			<name x="214" y="-66">end</name>
+		</location>
+		<location id="id26" x="0" y="-32">
+		</location>
+		<init ref="id26"/>
+		<transition>
+			<source ref="id26"/>
+			<target ref="id25"/>
+			<label kind="guard" x="56" y="-80">g(SET_WINNER)</label>
+			<label kind="assignment" x="52" y="-64">evt(SET_WINNER)</label>
+		</transition>
+		<transition>
+			<source ref="id26"/>
+			<target ref="id26"/>
+			<label kind="guard" x="-56" y="-168">g(INCR_TIME)</label>
+			<label kind="assignment" x="-56" y="-152">evt(INCR_TIME)</label>
+			<nail x="56" y="-128"/>
+			<nail x="-56" y="-128"/>
+		</transition>
+	</template>
+	<system>// Place template instantiations here.
+    MO1 = MunicipalOffice(-1);
+    EC1 = ElectionCommission(-2);
+    system Time, VoterL, MO1, EC1;
+progress{
+    day;
+}
+ </system>
+	<queries>
+		<query>
+			<formula></formula>
+			<comment></comment>
+		</query>
+	</queries>
+</nta>
