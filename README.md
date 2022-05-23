@@ -8,5 +8,5 @@
 ## Running verification
 
 1. Load the relevant model in Uppaal (`File` -> `Open System...`)
-2. Import the query list (`File` -> `Import Queries...`)
+2. Import the `queries.q` (`File` -> `Import Queries...`)
 3. Go to `Verifier` tab, select the relevant query and press `Check` 
